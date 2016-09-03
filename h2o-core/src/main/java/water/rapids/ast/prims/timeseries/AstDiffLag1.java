@@ -1,4 +1,4 @@
-package water.rapids.ast.prims.time;
+package water.rapids.ast.prims.timeseries;
 
 import water.MRTask;
 import water.fvec.Chunk;
@@ -13,10 +13,7 @@ import water.rapids.ast.AstRoot;
 import water.util.ArrayUtils;
 
 /**
- * R 'diff' command.
- * <p/>
- * This method is purely for the console right now.  Print stuff into the string buffer.
- * JSON response is not configured at all.
+ * Compute a difference of a time series where lag = 1
  */
 public class AstDiffLag1 extends AstPrimitive {
   @Override
@@ -25,45 +22,45 @@ public class AstDiffLag1 extends AstPrimitive {
   }
 
   @Override
-  public int nargs() {
-    return 1 + 1;
-  }
-
-  @Override
   public String str() {
     return "difflag1";
   }
 
   @Override
+  public int nargs() {
+    return 1 + 1; // (diff x lag)
+  }
+
+  @Override
   public Val apply(Env env, Env.StackHelp stk, AstRoot asts[]) {
-    Frame fr = stk.track(asts[2].exec(env).getFrame());
+    Frame fr = stk.track(asts[1].exec(env)).getFrame();
     if (fr.numCols() != 1)
       throw new IllegalArgumentException("Expected a single column for diff. Got: " + fr.numCols() + " columns.");
     if (!fr.anyVec().isNumeric())
       throw new IllegalArgumentException("Expected a numeric column for diff. Got: " + fr.anyVec().get_type_str());
 
-    final double[] lastElemPerChk = GetLastElemPerChunkTask.get(fr.anyVec());
+    final double[] lastElemPerChk = GetLastKElemPerChunkTask.get(fr.anyVec());
 
     return new ValFrame(new MRTask() {
       @Override
       public void map(Chunk c, NewChunk nc) {
-        if (c.cidx() == 0) nc.addNA();
+        if (c.cidx() == 0) nc.addNAs(1);
         else nc.addNum(c.atd(0) - lastElemPerChk[c.cidx() - 1]);
         for (int row = 1; row < c._len; ++row)
           nc.addNum(c.atd(row) - c.atd(row - 1));
       }
-    }.doAll(fr).outputFrame());
+    }.doAll(fr.types(), fr).outputFrame(fr.names(), fr.domains()));
   }
 
-  private static class GetLastElemPerChunkTask extends MRTask<GetLastElemPerChunkTask> {
+  private static class GetLastKElemPerChunkTask extends MRTask<GetLastKElemPerChunkTask> {
     double[] _res;
 
-    GetLastElemPerChunkTask(Vec v) {
+    GetLastKElemPerChunkTask(Vec v) {
       _res = new double[v.espc().length];
     }
 
     static double[] get(Vec v) {
-      GetLastElemPerChunkTask t = new GetLastElemPerChunkTask(v);
+      GetLastKElemPerChunkTask t = new GetLastKElemPerChunkTask(v);
       t.doAll(v);
       return t._res;
     }
@@ -74,7 +71,7 @@ public class AstDiffLag1 extends AstPrimitive {
     }
 
     @Override
-    public void reduce(GetLastElemPerChunkTask t) {
+    public void reduce(GetLastKElemPerChunkTask t) {
       ArrayUtils.add(_res, t._res);
     }
   }
